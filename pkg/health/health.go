@@ -25,7 +25,7 @@ func NewHealthChecker(pool *server.ServerPool, interval, timeout time.Duration) 
 }
 
 // Start launches the health checks in a separate goroutine
-func (hc *HealthChecker) Start() {
+func (hc *HealthChecker) StartHealthChecker() {
 	go func() {
 		ticker := time.NewTicker(hc.Interval)
 		defer ticker.Stop()
@@ -47,6 +47,10 @@ func (hc *HealthChecker) CheckServers() {
 		}
 		fmt.Printf("Health check: %s is alive=%v\n", s.Address, alive)
 	}
+	fmt.Printf("Health check: Completed successfully with %d/%d servers alive\n",
+		hc.Pool.CountAlive(),
+		len(hc.Pool.ListServers()),
+	)
 }
 
 // isAlive tries to open a TCP connection to the server
@@ -58,4 +62,3 @@ func (hc *HealthChecker) isAlive(addr string) bool {
 	conn.Close()
 	return true
 }
-

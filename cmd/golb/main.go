@@ -6,11 +6,12 @@ import (
 
 	"github.com/Gzimvra/golb/pkg/config"
 	"github.com/Gzimvra/golb/pkg/health"
+	"github.com/Gzimvra/golb/pkg/proxy"
 	"github.com/Gzimvra/golb/pkg/server"
 )
 
 func main() {
-    // Load the configuration file
+	// Load the configuration file
 	cfg, err := config.LoadConfigurationFile("./config.json")
 	if err != nil {
 		panic(err)
@@ -28,12 +29,11 @@ func main() {
 
 	// Start health checks
 	hc := health.NewHealthChecker(pool, cfg.HealthCheckDuration(), cfg.RequestTimeoutDuration())
+	hc.CheckServers() // Run initial health check before starting ticker
+	hc.StartHealthChecker()
 
-	// Run initial health check before starting ticker
-	hc.CheckServers()
-	fmt.Printf("Initial health check complete: %d/%d servers alive\n", pool.CountAlive(), len(pool.ListServers()))
-
-	hc.Start()
+	// Initialize proxy
+	prx := proxy.NewProxy(pool, cfg.RequestTimeoutDuration())
 
 	// Start a TCP listener
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
@@ -51,23 +51,7 @@ func main() {
 			continue
 		}
 
-		// spawn goroutine for each client
-		go handleConnection(conn)
+		// Forward connection through the proxy
+		go prx.Handle(conn)
 	}
-}
-
-func handleConnection(c net.Conn) {
-	defer c.Close()
-
-	buf := make([]byte, 4096)
-	n, _ := c.Read(buf)
-	fmt.Println("Received:", string(buf[:n]))
-
-	body := "Hello from the Load Balancer!"
-	response := fmt.Sprintf(
-		"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: text/plain\r\n\r\n%s",
-		len(body), body,
-	)
-
-	c.Write([]byte(response))
 }
