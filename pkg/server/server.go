@@ -36,6 +36,20 @@ func (s *Server) IsAlive() bool {
 	return s.Alive
 }
 
+// CountAlive returns the number of alive servers in the pool
+func (sp *ServerPool) CountAlive() int {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+
+	count := 0
+	for _, s := range sp.Servers {
+		if s.IsAlive() {
+			count++
+		}
+	}
+	return count
+}
+
 // AddServer adds a server to the pool
 func (sp *ServerPool) AddServer(s *Server) {
 	sp.mu.Lock()
@@ -44,7 +58,7 @@ func (sp *ServerPool) AddServer(s *Server) {
 }
 
 // All returns all servers
-func (sp *ServerPool) All() []*Server {
+func (sp *ServerPool) ListServers() []*Server {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
 	return sp.Servers

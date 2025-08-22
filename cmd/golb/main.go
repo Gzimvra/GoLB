@@ -5,14 +5,35 @@ import (
 	"net"
 
 	"github.com/Gzimvra/golb/pkg/config"
+	"github.com/Gzimvra/golb/pkg/health"
+	"github.com/Gzimvra/golb/pkg/server"
 )
 
 func main() {
+    // Load the configuration file
 	cfg, err := config.LoadConfigurationFile("./config.json")
 	if err != nil {
 		panic(err)
 	}
-    fmt.Println("Configuration File Successfully Loaded!")
+	fmt.Println("Configuration File Successfully Loaded!")
+
+	// Initialize server pool
+	pool := &server.ServerPool{}
+	for _, b := range cfg.Servers {
+		pool.AddServer(&server.Server{
+			Address: b.Address,
+			Alive:   false, // explicitly mark as dead at startup
+		})
+	}
+
+	// Start health checks
+	hc := health.NewHealthChecker(pool, cfg.HealthCheckDuration(), cfg.RequestTimeoutDuration())
+
+	// Run initial health check before starting ticker
+	hc.CheckServers()
+	fmt.Printf("Initial health check complete: %d/%d servers alive\n", pool.CountAlive(), len(pool.ListServers()))
+
+	hc.Start()
 
 	// Start a TCP listener
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
@@ -21,7 +42,7 @@ func main() {
 	}
 	defer listener.Close()
 
-	fmt.Println("Load balancer listening on", cfg.ListenAddr)
+	fmt.Printf("Load balancer listening on %v\n\n", cfg.ListenAddr)
 
 	for {
 		conn, err := listener.Accept()

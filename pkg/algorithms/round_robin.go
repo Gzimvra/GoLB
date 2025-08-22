@@ -17,7 +17,7 @@ func (rr *RoundRobin) Next() *server.Server {
 	rr.mu.Lock()
 	defer rr.mu.Unlock()
 
-	servers := rr.Pool.All()
+	servers := rr.Pool.ListServers()
 	if len(servers) == 0 {
 		return nil
 	}

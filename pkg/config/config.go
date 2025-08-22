@@ -12,11 +12,11 @@ type Server struct {
 }
 
 type Config struct {
-	ListenAddr          string    `json:"listen_addr"`
-	Algorithm           string    `json:"algorithm"`
-	HealthCheckInterval int       `json:"health_check_interval"`
-	RequestTimeout      int       `json:"request_timeout"`
-	Backends            []Server `json:"servers"`
+	ListenAddr          string   `json:"listen_addr"`
+	Algorithm           string   `json:"algorithm"`
+	HealthCheckInterval int      `json:"health_check_interval"`
+	RequestTimeout      int      `json:"request_timeout"`
+	Servers             []Server `json:"servers"`
 }
 
 // Load reads a JSON config file from the given path and returns a Config struct
