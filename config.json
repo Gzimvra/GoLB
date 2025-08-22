@@ -1,0 +1,17 @@
+{
+    "listen_addr": ":8080",
+    "algorithm": "round_robin",
+    "health_check_interval": 10,
+    "request_timeout": 5,
+    "servers": [
+        {
+            "address": "localhost:9001"
+        },
+        {
+            "address": "localhost:9002"
+        },
+        {
+            "address": "localhost:9003"
+        }
+    ]
+}

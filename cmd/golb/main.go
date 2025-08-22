@@ -3,17 +3,25 @@ package main
 import (
 	"fmt"
 	"net"
+
+	"github.com/Gzimvra/golb/pkg/config"
 )
 
 func main() {
+	cfg, err := config.LoadConfigurationFile("./config.json")
+	if err != nil {
+		panic(err)
+	}
+    fmt.Println("Configuration File Successfully Loaded!")
+
 	// Start a TCP listener
-	listener, err := net.Listen("tcp", ":8080")
+	listener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
 		panic(err)
 	}
 	defer listener.Close()
 
-	fmt.Println("Load balancer listening on :8080")
+	fmt.Println("Load balancer listening on", cfg.ListenAddr)
 
 	for {
 		conn, err := listener.Accept()
