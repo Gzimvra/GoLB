@@ -43,4 +43,3 @@ func NewRoundRobin(pool *server.ServerPool) *RoundRobin {
 		Pool: pool,
 	}
 }
-

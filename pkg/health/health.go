@@ -1,11 +1,11 @@
 package health
 
 import (
-	"fmt"
 	"net"
 	"time"
 
 	"github.com/Gzimvra/golb/pkg/server"
+	"github.com/Gzimvra/golb/pkg/utils"
 )
 
 // HealthChecker periodically checks the health of backend servers
@@ -24,7 +24,7 @@ func NewHealthChecker(pool *server.ServerPool, interval, timeout time.Duration) 
 	}
 }
 
-// Start launches the health checks in a separate goroutine
+// StartHealthChecker launches the health checks in a separate goroutine
 func (hc *HealthChecker) StartHealthChecker() {
 	go func() {
 		ticker := time.NewTicker(hc.Interval)
@@ -38,6 +38,7 @@ func (hc *HealthChecker) StartHealthChecker() {
 
 // CheckServers tests each server and marks it alive or dead
 func (hc *HealthChecker) CheckServers() {
+	utils.Info("Health check starting", nil)
 	for _, s := range hc.Pool.ListServers() {
 		alive := hc.isAlive(s.Address)
 		if alive {
@@ -45,12 +46,16 @@ func (hc *HealthChecker) CheckServers() {
 		} else {
 			s.MarkDead()
 		}
-		fmt.Printf("Health check: %s is alive=%v\n", s.Address, alive)
+		utils.Info("Health check", map[string]any{
+			"server": s.Address,
+			"alive":  alive,
+		})
 	}
-	fmt.Printf("Health check: Completed successfully with %d/%d servers alive\n",
-		hc.Pool.CountAlive(),
-		len(hc.Pool.ListServers()),
-	)
+
+	utils.Info("Health check completed", map[string]any{
+		"alive_count": hc.Pool.CountAlive(),
+		"total":       len(hc.Pool.ListServers()),
+	})
 }
 
 // isAlive tries to open a TCP connection to the server
@@ -62,3 +67,4 @@ func (hc *HealthChecker) isAlive(addr string) bool {
 	conn.Close()
 	return true
 }
+

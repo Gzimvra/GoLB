@@ -2,9 +2,10 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"time"
+
+	"github.com/Gzimvra/golb/pkg/utils"
 )
 
 type Server struct {
@@ -21,29 +22,36 @@ type Config struct {
 
 // Load reads a JSON config file from the given path and returns a Config struct
 func LoadConfigurationFile(path string) (*Config, error) {
+	log := utils.GetLogger()
+
 	file, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read config file: %w", err)
+		log.Error("Cannot read config file", nil)
+		return nil, err
 	}
 
 	var cfg Config
-	err = json.Unmarshal(file, &cfg)
-	if err != nil {
-		return nil, fmt.Errorf("invalid config format: %w", err)
+	if err := json.Unmarshal(file, &cfg); err != nil {
+		log.Error("Invalid config format", nil)
+		return nil, err
 	}
 
 	// Set defaults if needed
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = ":8080"
+		log.Warn("ListenAddr not set in config, using default :8080", nil)
 	}
 	if cfg.Algorithm == "" {
 		cfg.Algorithm = "round_robin"
+		log.Warn("Algorithm not set in config, using default round_robin", nil)
 	}
 	if cfg.HealthCheckInterval <= 0 {
 		cfg.HealthCheckInterval = 10
+		log.Warn("HealthCheckInterval invalid or not set, using default 10s", nil)
 	}
 	if cfg.RequestTimeout <= 0 {
 		cfg.RequestTimeout = 5
+		log.Warn("RequestTimeout invalid or not set, using default 5s", nil)
 	}
 
 	return &cfg, nil
