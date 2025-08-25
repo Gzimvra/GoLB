@@ -5,6 +5,7 @@ import (
 
 	"github.com/Gzimvra/golb/pkg/config"
 	"github.com/Gzimvra/golb/pkg/health"
+	"github.com/Gzimvra/golb/pkg/middleware"
 	"github.com/Gzimvra/golb/pkg/proxy"
 	"github.com/Gzimvra/golb/pkg/server"
 	"github.com/Gzimvra/golb/pkg/utils"
@@ -40,6 +41,9 @@ func main() {
 	// Initialize proxy
 	prx := proxy.NewProxy(pool, cfg.RequestTimeoutDuration())
 
+	// Initialize rate limiter middleware
+	rateLimiter := middleware.NewRateLimiter(cfg.MaxConcurrentConnections, cfg.MaxConnectionsPerMinute)
+
 	// Start TCP listener
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
@@ -56,8 +60,20 @@ func main() {
 			continue
 		}
 
-		// Forward connection through the proxy
-		go prx.Handle(conn)
+		clientIP := middleware.GetClientIP(conn)
+
+		// Rate limiting check
+		if !rateLimiter.Allow(clientIP) {
+			utils.Warn("Connection rejected due to rate limiting", map[string]any{"ip": clientIP})
+			conn.Close()
+			continue
+		}
+
+		// Make sure Done is called when the connection closes
+		go func(c net.Conn, ip string) {
+			defer rateLimiter.Done(ip)
+			prx.Handle(c)
+		}(conn, clientIP)
 	}
 }
 

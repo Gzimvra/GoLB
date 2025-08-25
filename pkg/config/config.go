@@ -13,14 +13,16 @@ type Server struct {
 }
 
 type Config struct {
-	ListenAddr          string   `json:"listen_addr"`
-	Algorithm           string   `json:"algorithm"`
-	HealthCheckInterval int      `json:"health_check_interval"`
-	RequestTimeout      int      `json:"request_timeout"`
-	Servers             []Server `json:"servers"`
+	ListenAddr               string   `json:"listen_addr"`
+	Algorithm                string   `json:"algorithm"`
+	HealthCheckInterval      int      `json:"health_check_interval"`
+	RequestTimeout           int      `json:"request_timeout"`
+	MaxConcurrentConnections int      `json:"max_concurrent_connections"`
+	MaxConnectionsPerMinute  int      `json:"max_connections_per_minute"`
+	Servers                  []Server `json:"servers"`
 }
 
-// Load reads a JSON config file from the given path and returns a Config struct
+// LoadConfigurationFile reads a JSON config file from the given path and returns a Config struct
 func LoadConfigurationFile(path string) (*Config, error) {
 	log := utils.GetLogger()
 
@@ -53,6 +55,14 @@ func LoadConfigurationFile(path string) (*Config, error) {
 		cfg.RequestTimeout = 5
 		log.Warn("RequestTimeout invalid or not set, using default 5s", nil)
 	}
+	if cfg.MaxConcurrentConnections <= 0 {
+		cfg.MaxConcurrentConnections = 10
+		log.Warn("MaxConcurrentConnections invalid or not set, using default 10", nil)
+	}
+	if cfg.MaxConnectionsPerMinute <= 0 {
+		cfg.MaxConnectionsPerMinute = 50
+		log.Warn("MaxConnectionsPerMinute invalid or not set, using default 50", nil)
+	}
 
 	return &cfg, nil
 }
@@ -66,3 +76,4 @@ func (c *Config) HealthCheckDuration() time.Duration {
 func (c *Config) RequestTimeoutDuration() time.Duration {
 	return time.Duration(c.RequestTimeout) * time.Second
 }
+

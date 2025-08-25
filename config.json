@@ -3,6 +3,8 @@
     "algorithm": "round_robin",
     "health_check_interval": 10,
     "request_timeout": 5,
+    "max_concurrent_connections": 10,
+    "max_connections_per_minute": 50,
     "servers": [
         {
             "address": "localhost:9001"

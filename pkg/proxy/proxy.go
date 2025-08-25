@@ -3,6 +3,7 @@ package proxy
 import (
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/Gzimvra/golb/pkg/algorithms"
@@ -24,7 +25,7 @@ func NewProxy(pool *server.ServerPool, timeout time.Duration) *Proxy {
 	}
 }
 
-// Handle forwards the client connection to the selected backend
+// Handle is the entry point for a client connection
 func (p *Proxy) Handle(clientConn net.Conn) {
 	defer clientConn.Close()
 
@@ -34,41 +35,7 @@ func (p *Proxy) Handle(clientConn net.Conn) {
 		return
 	}
 
-	maxAttempts := len(servers) // try each server once
-	var backendConn net.Conn
-	var backend *server.Server
-	var err error
-
-	for range maxAttempts {
-		backend = p.RoundRobin.Next()
-
-		if backend == nil {
-			// All servers marked dead, try on-demand probe
-			for _, s := range servers {
-				backendConn, err = net.DialTimeout("tcp", s.Address, p.Timeout)
-				if err == nil {
-					backend = s
-					backend.MarkAlive()
-					utils.Info("Recovered server via on-demand check", map[string]any{"server": s.Address})
-					break
-				}
-			}
-			if backendConn == nil {
-				utils.Warn("No alive backend available", nil)
-				return
-			}
-			break
-		}
-
-		backendConn, err = net.DialTimeout("tcp", backend.Address, p.Timeout)
-		if err == nil {
-			break
-		}
-
-		utils.Warn("Failed to connect to backend", map[string]any{"server": backend.Address, "error": err})
-		backend.MarkDead() // mark dead so health checker will revalidate later
-	}
-
+	backendConn, backend := p.getBackendConnection(servers)
 	if backendConn == nil {
 		utils.Warn("All backend connection attempts failed", nil)
 		return
@@ -76,9 +43,75 @@ func (p *Proxy) Handle(clientConn net.Conn) {
 	defer backendConn.Close()
 
 	utils.Info("Forwarding request to backend", map[string]any{"server": backend.Address})
+	p.pipeTraffic(clientConn, backendConn)
+}
 
-	// Proxy data: client <-> backend
-	go io.Copy(backendConn, clientConn)
-	io.Copy(clientConn, backendConn)
+// getBackendConnection selects and connects to a backend server
+func (p *Proxy) getBackendConnection(servers []*server.Server) (net.Conn, *server.Server) {
+	maxAttempts := len(servers)
+	var backendConn net.Conn
+	var backend *server.Server
+	var err error
+
+	for range maxAttempts {
+		backend = p.RoundRobin.Next()
+		if backend == nil {
+			// All servers marked dead, try recovery
+			return p.recoverBackend(servers)
+		}
+
+		backendConn, err = net.DialTimeout("tcp", backend.Address, p.Timeout)
+		if err == nil {
+			return backendConn, backend
+		}
+
+		utils.Warn("Failed to connect to backend", map[string]any{
+			"server": backend.Address,
+			"error":  err,
+		})
+		backend.MarkDead()
+	}
+
+	return nil, nil
+}
+
+// recoverBackend tries to reconnect to servers previously marked as dead
+func (p *Proxy) recoverBackend(servers []*server.Server) (net.Conn, *server.Server) {
+	for _, s := range servers {
+		backendConn, err := net.DialTimeout("tcp", s.Address, p.Timeout)
+		if err == nil {
+			s.MarkAlive()
+			utils.Info("Recovered server via on-demand check", map[string]any{"server": s.Address})
+			return backendConn, s
+		}
+	}
+	utils.Warn("No alive backend available", nil)
+	return nil, nil
+}
+
+// pipeTraffic proxies data between client and backend safely
+func (p *Proxy) pipeTraffic(clientConn, backendConn net.Conn) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// client -> backend
+	go func() {
+		defer wg.Done()
+		io.Copy(backendConn, clientConn)
+		if tcpConn, ok := backendConn.(*net.TCPConn); ok {
+			tcpConn.CloseWrite() // signal EOF to backend
+		}
+	}()
+
+	// backend -> client
+	go func() {
+		defer wg.Done()
+		io.Copy(clientConn, backendConn)
+		if tcpConn, ok := clientConn.(*net.TCPConn); ok {
+			tcpConn.CloseWrite() // signal EOF to client
+		}
+	}()
+
+	wg.Wait() // wait for both directions to finish
 }
 
