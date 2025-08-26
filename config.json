@@ -5,15 +5,11 @@
     "request_timeout": 5,
     "max_concurrent_connections": 10,
     "max_connections_per_minute": 50,
+    "allow_list": ["192.168.1.81"],
+    "deny_list": ["10.0.0.5"],
     "servers": [
-        {
-            "address": "localhost:9001"
-        },
-        {
-            "address": "localhost:9002"
-        },
-        {
-            "address": "localhost:9003"
-        }
+        { "address": "localhost:9001" },
+        { "address": "localhost:9002" },
+        { "address": "localhost:9003" }
     ]
 }

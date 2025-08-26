@@ -8,7 +8,7 @@ import (
 
 	"github.com/Gzimvra/golb/pkg/algorithms"
 	"github.com/Gzimvra/golb/pkg/server"
-	"github.com/Gzimvra/golb/pkg/utils"
+	"github.com/Gzimvra/golb/pkg/utils/logger"
 )
 
 // Proxy forwards connections to backend servers using RoundRobin
@@ -31,18 +31,18 @@ func (p *Proxy) Handle(clientConn net.Conn) {
 
 	servers := p.RoundRobin.Pool.ListServers()
 	if len(servers) == 0 {
-		utils.Warn("No servers configured", nil)
+		logger.Warn("No servers configured", nil)
 		return
 	}
 
 	backendConn, backend := p.getBackendConnection(servers)
 	if backendConn == nil {
-		utils.Warn("All backend connection attempts failed", nil)
+		logger.Warn("All backend connection attempts failed", nil)
 		return
 	}
 	defer backendConn.Close()
 
-	utils.Info("Forwarding request to backend", map[string]any{"server": backend.Address})
+	logger.Info("Forwarding request to backend", map[string]any{"server": backend.Address})
 	p.pipeTraffic(clientConn, backendConn)
 }
 
@@ -65,7 +65,7 @@ func (p *Proxy) getBackendConnection(servers []*server.Server) (net.Conn, *serve
 			return backendConn, backend
 		}
 
-		utils.Warn("Failed to connect to backend", map[string]any{
+		logger.Warn("Failed to connect to backend", map[string]any{
 			"server": backend.Address,
 			"error":  err,
 		})
@@ -81,11 +81,11 @@ func (p *Proxy) recoverBackend(servers []*server.Server) (net.Conn, *server.Serv
 		backendConn, err := net.DialTimeout("tcp", s.Address, p.Timeout)
 		if err == nil {
 			s.MarkAlive()
-			utils.Info("Recovered server via on-demand check", map[string]any{"server": s.Address})
+			logger.Info("Recovered server via on-demand check", map[string]any{"server": s.Address})
 			return backendConn, s
 		}
 	}
-	utils.Warn("No alive backend available", nil)
+	logger.Warn("No alive backend available", nil)
 	return nil, nil
 }
 
@@ -114,4 +114,3 @@ func (p *Proxy) pipeTraffic(clientConn, backendConn net.Conn) {
 
 	wg.Wait() // wait for both directions to finish
 }
-

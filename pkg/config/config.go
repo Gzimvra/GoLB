@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/Gzimvra/golb/pkg/utils"
+	"github.com/Gzimvra/golb/pkg/utils/logger"
 )
 
 type Server struct {
@@ -19,12 +19,14 @@ type Config struct {
 	RequestTimeout           int      `json:"request_timeout"`
 	MaxConcurrentConnections int      `json:"max_concurrent_connections"`
 	MaxConnectionsPerMinute  int      `json:"max_connections_per_minute"`
+	IPAllowList              []string `json:"ip_allowlist"`
+	IPDenyList               []string `json:"ip_denylist"`
 	Servers                  []Server `json:"servers"`
 }
 
 // LoadConfigurationFile reads a JSON config file from the given path and returns a Config struct
 func LoadConfigurationFile(path string) (*Config, error) {
-	log := utils.GetLogger()
+	log := logger.GetLogger()
 
 	file, err := os.ReadFile(path)
 	if err != nil {
@@ -64,6 +66,14 @@ func LoadConfigurationFile(path string) (*Config, error) {
 		log.Warn("MaxConnectionsPerMinute invalid or not set, using default 50", nil)
 	}
 
+	// IP allow/deny lists default to empty slices
+	if cfg.IPAllowList == nil {
+		cfg.IPAllowList = []string{}
+	}
+	if cfg.IPDenyList == nil {
+		cfg.IPDenyList = []string{}
+	}
+
 	return &cfg, nil
 }
 
@@ -76,4 +86,3 @@ func (c *Config) HealthCheckDuration() time.Duration {
 func (c *Config) RequestTimeoutDuration() time.Duration {
 	return time.Duration(c.RequestTimeout) * time.Second
 }
-
