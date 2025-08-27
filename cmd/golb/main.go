@@ -5,10 +5,12 @@ import (
 
 	"github.com/Gzimvra/golb/pkg/config"
 	"github.com/Gzimvra/golb/pkg/health"
+	"github.com/Gzimvra/golb/pkg/middleware/ipfilter"
 	"github.com/Gzimvra/golb/pkg/middleware/ratelimiter"
 	"github.com/Gzimvra/golb/pkg/proxy"
 	"github.com/Gzimvra/golb/pkg/server"
 	"github.com/Gzimvra/golb/pkg/utils/logger"
+	"github.com/Gzimvra/golb/pkg/utils/netutils"
 )
 
 func main() {
@@ -45,6 +47,9 @@ func main() {
 	// Initialize rate limiter
 	rl := ratelimiter.NewRateLimiter(cfg.MaxConcurrentConnections, cfg.MaxConnectionsPerMinute)
 
+	// Initialize IP filter
+	ipf := ipfilter.NewIPFilter(cfg)
+
 	// Start TCP listener
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
@@ -61,20 +66,30 @@ func main() {
 			continue
 		}
 
-		clientIP := ratelimiter.GetClientIP(conn)
+		clientIP := netutils.GetClientIP(conn)
 
-		// Rate limiting check
-		if !rl.Allow(clientIP) {
-			logger.Warn("Connection rejected due to rate limiting", map[string]any{"ip": clientIP})
-			conn.Close()
-			continue
-		}
-
-		// Handle connection with Done() deferred
-		go func(c net.Conn, ip string) {
-			defer rl.Done(ip)
-			prx.Handle(c)
-		}(conn, clientIP)
+		handleConnection(conn, clientIP, ipf, rl, prx)
 	}
 }
 
+func handleConnection(conn net.Conn, clientIP string, ipf *ipfilter.IPFilter, rl *ratelimiter.RateLimiter, prx *proxy.Proxy) {
+	// IP filter
+	if !ipf.Allow(clientIP) {
+		logger.Warn("Connection rejected by IP filter", map[string]any{"ip": clientIP})
+		conn.Close()
+		return
+	}
+
+	// Rate limiter
+	if !rl.Allow(clientIP) {
+		logger.Warn("Connection rejected due to rate limiting", map[string]any{"ip": clientIP})
+		conn.Close()
+		return
+	}
+
+	// Handle connection
+	go func(c net.Conn, ip string) {
+		defer rl.Done(ip)
+		prx.Handle(c)
+	}(conn, clientIP)
+}

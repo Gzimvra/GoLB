@@ -1,7 +1,6 @@
 package ratelimiter
 
 import (
-	"net"
 	"sync"
 	"time"
 )
@@ -76,10 +75,4 @@ func (rl *RateLimiter) Done(clientIP string) {
 	if stats, exists := rl.Clients[clientIP]; exists && stats.Concurrent > 0 {
 		stats.Concurrent--
 	}
-}
-
-// Helper to extract client IP from net.Conn
-func GetClientIP(conn net.Conn) string {
-	ip, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
-	return ip
 }
