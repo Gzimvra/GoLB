@@ -1,76 +1,161 @@
-# Custom Load Balancer in Go
+# GoLB – Raw TCP Load Balancer in Go
 
 ## Project Overview
-This is a custom TCP/HTTP load balancer written in Go.
-It accepts client requests, distributes them across multiple backend servers using simple algorithms (e.g., round-robin), and keeps track of server health with background checks.
 
-The project is designed as a learning exercise to explore how load balancers work under the hood, including connection handling, request forwarding, and health monitoring.
+This project is a custom TCP load balancer written in Go.
+It accepts incoming TCP connections from clients and distributes them across multiple backend servers using a simple algorithm (round-robin).
 
----
+The load balancer also includes:
 
-## Architecture & Request Lifecycle
+-   Health checks: backends are marked alive/unhealthy automatically.
+-   IP whitelisting: restrict which clients can connect.
+-   Rate limiting: protect against abusive clients.
+-   Logging: connections, rejections, and errors are logged.
+
+This project is mainly a learning exercise to explore how Layer 4 load balancers work under the hood.
+
+## How to run
+
+### 1. Clone and Build
+
+```bash
+git clone https://github.com/Gzimvra/golb.git
+cd golb
+go build -o golb ./cmd/golb
+```
+
+### 2. Start Example Backends
+
+Open 3 separate terminals and run the provided backend servers:
+
+```bash
+go run ./examples/backends/backend1/main.go
+go run ./examples/backends/backend2/main.go
+go run ./examples/backends/backend3/main.go
+```
+
+By default, they listen on different ports (configured inside their main.go).
+
+### 3. Configure the Load Balancer
+
+-   Edit config.json if needed.
+
+```json
+{
+    "listen_addr": ":8080",
+    "algorithm": "round_robin",
+    "health_check_interval": 10,
+    "request_timeout": 5,
+    "max_concurrent_connections": 10,
+    "max_connections_per_minute": 50,
+    "ip_filter_mode": "allow",
+    "ip_filter_list": ["127.0.0.1"],
+    "servers": [
+        { "address": "localhost:9001" },
+        { "address": "localhost:9002" },
+        { "address": "localhost:9003" }
+    ]
+}
+```
+
+### 4. Run the Load Balancer
+
+```bash
+# run the binary
+./golb
+
+# or you can also run directly for convenience
+go run ./cmd/golb
+```
+
+It will listen on :8080 (default) and forward connections to healthy backends.
+
+### 5. Test from Client
+
+From another terminal, use curl or nc:
+
+```bash
+curl http://127.0.0.1:8080
+# or
+nc 127.0.0.1 8080
+```
+
+Requests will be distributed to your backends in round-robin order.
+
+## Architecture & Connection Lifecycle
 
 This document explains the request flow through the load balancer, what gets returned to the user, and how health checks are managed.
 
-### 1. Client Sends a Request
-- Example: User hits `https://myapp.com/api/users`.
-- DNS resolves `myapp.com` → IP address of your load balancer.
+### 1. Client Opens a TCP Connection
+
+-   Example: User connects to `127.0.0.1:8080`.
+-   The load balancer listens on a given address/port (config.json).
 
 ### 2. Load Balancer Receives the Request
-- Accepts the TCP/HTTP connection.
-- (Optional) **TLS termination**: LB decrypts HTTPS and forwards plain HTTP to backends.
-- (Optional) **Rate limiting / DDoS protection**: LB may throttle abusive clients.
-- Reads the request (headers, body, etc.).
 
-### 3. Load Balancing Decision
-- **Health checks**: The LB maintains a pool of healthy servers and ignores unhealthy ones.
-- **Algorithm**: Selects a backend (e.g., round robin, least connections, random).
-- (Optional: Depends on the algorithm used) **Session persistence (sticky sessions)**: Same user is routed to the same backend.
-- Example: LB chooses `http://app-server-2:9000`.
+-   Accepts the TCP connection.
+-   (Configurable) IP filtering: connection is rejected if client IP is not allowed.
+-   (Configurable) Rate limiting: connection is rejected if limits are exceeded.
 
-### 4. Forwarding the Request (Reverse Proxying)
-- The LB forwards the request to the chosen backend:
-  - **HTTP**: Adjusts headers (`X-Forwarded-For`, `Host`) so the backend knows the real client.
-  - **TCP**: Simply forwards raw data.
-- (Optional) **Retries / failover**: If a backend fails, the LB retries with another healthy server.
+### 3. Backend Selection
 
-### 5. Backend Application Server Handles the Request
-- Processes the request (e.g., database queries, business logic).
-- Returns an HTTP response (status code, headers, body).
+-   The load balancer maintains a pool of healthy servers.
+-   It selects a backend using round-robin (default algorithm).
+-   Only servers marked Alive == true are considered.
 
-### 6. Load Balancer Receives the Response
-- Gets the response from the backend.
-- (Optional) Modifies or adds headers (e.g., `X-Backend-Server: app-server-2` for debugging).
-- (Optional) Applies optimizations such as compression or caching.
+### 4. Connection Proxying
 
-### 7. Client Receives the Response
-- To the user, it looks like the response came directly from the load balancer (they don’t see which backend handled it).
-- Example:
-  ```json
-  [{ "id": 1, "name": "Mark" }]
-  ```
+-   The LB proxies the TCP stream between the client and backend.
+-   No application-level parsing or modification is performed.
+-   Data is forwarded transparently in both directions.
 
----
+### 5. Backend Responds
+
+-   The backend processes the request and sends data back over the TCP connection.
+-   The load balancer relays this data to the client.
+-   To the user, it looks like the response came directly from the load balancer (they don’t see which backend handled it).
+-   Example:
+    ```json
+    [{ "id": 1, "name": "Mark" }]
+    ```
+
+### 6. Connection Lifecycle Ends
+
+-   When the client or backend closes the connection, the LB cleans up resources.
+-   Metrics (total connections, rejections, active connections) can be tracked.
 
 ## What Gets Returned to the User?
-- The backend’s response (status + headers + body).
-- Possibly extra headers added by the load balancer (for logging/tracing).
-- If the backend is down and no healthy servers are available:
-    - LB can return an error (`502 Bad Gateway`, `503 Service Unavailable`).
+
+-   Whatever the backend server sends.
+-   The LB does not modify the payload — it simply forwards raw TCP data.
+-   If your backends are HTTP servers, the client will see full HTTP responses.
+-   For non-HTTP TCP apps, the raw stream is passed through unchanged.
 
 ## What About Health Checks — When & Where
+
 ### 1. When Do Health Checks Run?
-- They don’t happen on every client request (that would add latency and overhead).
-- Instead, the load balancer runs them in the background on a schedule (e.g., every 5 seconds, 10 seconds, etc.) via a separate goroutine.
-- Health checks are proactive: the LB keeps an up-to-date view of which servers are alive before traffic arrives.
+
+-   They don’t happen on every client request (that would add latency and overhead).
+-   Instead, the load balancer runs them in the background on a schedule (e.g., every 5 seconds, 10 seconds, etc.) via a separate goroutine.
+-   Health checks are proactive: the LB keeps an up-to-date view of which servers are alive before traffic arrives.
 
 ### 2. Where Do Health Checks Happen?
-- A separate goroutine inside the LB periodically sends test requests to each backend.
-    - HTTP: The LB calls `http://server:port/health` or `/ping` and expects `200 OK`.
-    - TCP: The LB tries opening a socket connection. If the handshake succeeds, the server is alive.
+
+-   A separate goroutine inside the LB periodically sends test requests to each backend.
+-   The LB tries opening a socket connection. If the handshake succeeds, the server is alive.
 
 ### 3. How Are Results Used?
-- The LB keeps a pool of backend servers with status info like: "Alive"
-- The health checker updates `Alive = true/false` in that pool.
-- When a client request comes in (step 3 of the flow), the load balancing algorithm only considers servers where `Alive == true`.
 
+-   The LB keeps a pool of backend servers with status info like: "Alive"
+-   The health checker updates `Alive = true/false` in that pool.
+-   When a client request comes in (step 3 of the flow), the load balancing algorithm only considers servers where `Alive == true`.
+
+## Future Enhancements
+
+Some features that could be added to make the load balancer more production-ready:
+
+-   TLS support for encrypted connections (client ↔ LB).
+-   Sticky sessions to keep a client pinned to the same backend.
+-   Pluggable algorithms (least-connections, random, weighted round-robin).
+-   Prometheus metrics for observability.
+-   Configuration reloads without downtime (hot reload).
