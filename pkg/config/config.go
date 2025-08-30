@@ -14,6 +14,9 @@ type Server struct {
 
 type Config struct {
 	ListenAddr               string   `json:"listen_addr"`
+	AcceptTLS                bool     `json:"accept_tls"`
+	TLSCertFile              string   `json:"tls_cert_file"`
+	TLSKeyFile               string   `json:"tls_key_file"`
 	Algorithm                string   `json:"algorithm"`
 	HealthCheckInterval      int      `json:"health_check_interval"`
 	RequestTimeout           int      `json:"request_timeout"`

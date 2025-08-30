@@ -1,6 +1,7 @@
 package health
 
 import (
+	"context"
 	"net"
 	"time"
 
@@ -24,14 +25,20 @@ func NewHealthChecker(pool *server.ServerPool, interval, timeout time.Duration) 
 	}
 }
 
-// StartHealthChecker launches the health checks in a separate goroutine
-func (hc *HealthChecker) StartHealthChecker() {
+// StartHealthChecker launches the health checks in a separate goroutine and stops when ctx is done
+func (hc *HealthChecker) StartHealthChecker(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(hc.Interval)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			hc.CheckServers()
+		for {
+			select {
+			case <-ticker.C:
+				hc.CheckServers()
+			case <-ctx.Done():
+				logger.Info("Health checker stopped", nil)
+				return
+			}
 		}
 	}()
 }

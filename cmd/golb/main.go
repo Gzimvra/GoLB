@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"os"
 	"os/signal"
@@ -17,6 +18,8 @@ import (
 	"github.com/Gzimvra/golb/pkg/utils/logger"
 	"github.com/Gzimvra/golb/pkg/utils/netutils"
 )
+
+var activeConns sync.Map // Track all active connections
 
 func main() {
 	// Initialize logger
@@ -40,30 +43,29 @@ func main() {
 		})
 	}
 
-	// Start health checks
+	// Context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start health checks with context
 	hc := health.NewHealthChecker(pool, cfg.HealthCheckDuration(), cfg.RequestTimeoutDuration())
 	hc.CheckServers()
-	hc.StartHealthChecker()
+	hc.StartHealthChecker(ctx)
 	logger.Info("Health checker started", nil)
 
-	// Initialize proxy
+	// Initialize proxy, rate limiter, and IP filter
 	prx := proxy.NewProxy(pool, cfg.RequestTimeoutDuration())
-
-	// Initialize rate limiter and IP filter
 	rl := ratelimiter.NewRateLimiter(cfg.MaxConcurrentConnections, cfg.MaxConnectionsPerMinute)
 	ipf := ipfilter.NewIPFilter(cfg)
 
-	// TCP listener
-	listener, err := net.Listen("tcp", cfg.ListenAddr)
+	// Start listener (TCP or TLS)
+	listener, err := startListener(cfg)
 	if err != nil {
-		logger.Error("Failed to start TCP listener", nil)
+		logger.Error("Failed to start listener", map[string]any{"err": err.Error()})
 		panic(err)
 	}
 	defer listener.Close()
-	logger.Info("Load balancer listening on "+cfg.ListenAddr, nil)
 
-	// Context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 
 	// Listen for OS signals
@@ -75,8 +77,16 @@ func main() {
 		logger.Info("Shutdown signal received", nil)
 		cancel()
 		listener.Close() // stop accepting new connections
+
+		// Close all active connections
+		activeConns.Range(func(key, _ any) bool {
+			conn := key.(net.Conn)
+			conn.Close()
+			return true
+		})
 	}()
 
+	// Accept loop
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -87,7 +97,7 @@ func main() {
 				logger.Info("All connections finished. Exiting.", nil)
 				return
 			default:
-				logger.Warn("Error accepting connection", nil)
+				logger.Warn("Error accepting connection", map[string]any{"err": err.Error()})
 				continue
 			}
 		}
@@ -102,24 +112,52 @@ func main() {
 	}
 }
 
-
 func handleConnection(conn net.Conn, clientIP string, ipf *ipfilter.IPFilter, rl *ratelimiter.RateLimiter, prx *proxy.Proxy) {
+	// Track active connection
+	activeConns.Store(conn, struct{}{})
+	defer activeConns.Delete(conn)
+	defer conn.Close()
+	defer rl.Done(clientIP)
+
 	// IP filter
 	if !ipf.Allow(clientIP) {
 		logger.Warn("Connection rejected by IP filter", map[string]any{"ip": clientIP})
-		conn.Close()
 		return
 	}
 
 	// Rate limiter
 	if !rl.Allow(clientIP) {
 		logger.Warn("Connection rejected due to rate limiting", map[string]any{"ip": clientIP})
-		conn.Close()
 		return
 	}
 
-	// Handle connection synchronously
-	defer rl.Done(clientIP)
+	// Handle the request
 	prx.Handle(conn)
+}
+
+// startListener chooses between plain TCP and TLS
+func startListener(cfg *config.Config) (net.Listener, error) {
+	if cfg.AcceptTLS {
+		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+		if err != nil {
+			logger.Error("Failed to load TLS certificate or key", map[string]any{
+				"cert": cfg.TLSCertFile,
+				"key":  cfg.TLSKeyFile,
+				"err":  err.Error(),
+			})
+			return nil, err
+		}
+
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		}
+
+		logger.Info("TLS enabled. Listening on "+cfg.ListenAddr, nil)
+		return tls.Listen("tcp", cfg.ListenAddr, tlsConfig)
+	}
+
+	logger.Info("Plain TCP mode. Listening on "+cfg.ListenAddr, nil)
+	return net.Listen("tcp", cfg.ListenAddr)
 }
 

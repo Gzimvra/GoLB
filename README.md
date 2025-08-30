@@ -10,6 +10,8 @@ The load balancer also includes:
 -   Health checks: backends are marked alive/unhealthy automatically.
 -   IP whitelisting: restrict which clients can connect.
 -   Rate limiting: protect against abusive clients.
+-   TLS support: optional TLS termination (client ↔ LB, decrypted before proxying to backends).
+-   Graceful shutdown: active connections are tracked and closed cleanly.
 -   Logging: connections, rejections, and errors are logged.
 
 This project is mainly a learning exercise to explore how Layer 4 load balancers work under the hood.
@@ -38,11 +40,14 @@ By default, they listen on different ports (configured inside their main.go).
 
 ### 3. Configure the Load Balancer
 
--   Edit config.json if needed.
+Edit config.json if needed.
 
 ```json
 {
     "listen_addr": ":8080",
+    "accept_tls": false,
+    "tls_cert_file": "./certs/server.crt",
+    "tls_key_file": "./certs/server.key",
     "algorithm": "round_robin",
     "health_check_interval": 10,
     "request_timeout": 5,
@@ -58,6 +63,22 @@ By default, they listen on different ports (configured inside their main.go).
 }
 ```
 
+#### Generate Self-Signed TLS Certificates (Optional)
+
+If you want to run the load balancer with TLS, you need to set `"accept_tls": true` and you also need a certificate and private key.
+This repo includes a helper script (scripts/generate-certs.sh) that uses OpenSSL to create a self-signed certificate:
+
+```bash
+./scripts/generate-certs.sh
+```
+
+This will generate:
+
+-   certs/server.crt – the public certificate
+-   certs/server.key – the private key
+
+> ⚠️ Note: These are self-signed certificates, intended only for local testing. In production, you would use certificates from a trusted CA (e.g., Let’s Encrypt).
+
 ### 4. Run the Load Balancer
 
 ```bash
@@ -72,12 +93,16 @@ It will listen on :8080 (default) and forward connections to healthy backends.
 
 ### 5. Test from Client
 
-From another terminal, use curl or nc:
+From another terminal, use curl:
 
 ```bash
 curl http://127.0.0.1:8080
-# or
-nc 127.0.0.1 8080
+```
+
+If TLS is enabled (`accept_tls = true`), connect via:
+
+```bash
+curl -k https://127.0.0.1:8080
 ```
 
 Requests will be distributed to your backends in round-robin order.
@@ -94,6 +119,7 @@ This document explains the request flow through the load balancer, what gets ret
 ### 2. Load Balancer Receives the Request
 
 -   Accepts the TCP connection.
+-   (Configurable) TLS support: wraps the listener with `tls.NewListener` if enabled.
 -   (Configurable) IP filtering: connection is rejected if client IP is not allowed.
 -   (Configurable) Rate limiting: connection is rejected if limits are exceeded.
 
@@ -101,7 +127,7 @@ This document explains the request flow through the load balancer, what gets ret
 
 -   The load balancer maintains a pool of healthy servers.
 -   It selects a backend using round-robin (default algorithm).
--   Only servers marked Alive == true are considered.
+-   Only servers marked `Alive == true` are considered.
 
 ### 4. Connection Proxying
 
@@ -142,7 +168,7 @@ This document explains the request flow through the load balancer, what gets ret
 ### 2. Where Do Health Checks Happen?
 
 -   A separate goroutine inside the LB periodically sends test requests to each backend.
--   The LB tries opening a socket connection. If the handshake succeeds, the server is alive.
+-   The LB performs a TCP dial (no HTTP requests). If the TCP handshake succeeds, the backend is considered alive.
 
 ### 3. How Are Results Used?
 
@@ -154,7 +180,6 @@ This document explains the request flow through the load balancer, what gets ret
 
 Some features that could be added to make the load balancer more production-ready:
 
--   TLS support for encrypted connections (client ↔ LB).
 -   Sticky sessions to keep a client pinned to the same backend.
 -   Pluggable algorithms (least-connections, random, weighted round-robin).
 -   Prometheus metrics for observability.

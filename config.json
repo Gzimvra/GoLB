@@ -1,5 +1,8 @@
 {
     "listen_addr": ":8080",
+    "accept_tls": true,
+    "tls_cert_file": "./certs/server.crt",
+    "tls_key_file": "./certs/server.key",
     "algorithm": "round_robin",
     "health_check_interval": 10,
     "request_timeout": 5,
